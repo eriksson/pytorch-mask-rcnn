@@ -1440,7 +1440,6 @@ class MaskRCNN(nn.Module):
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
 
-        # resnet = ResNet("resnet101", stage5=True)
         resnet = ResNet("resnet50", stage5=True)
         C1, C2, C3, C4, C5 = resnet.stages()
 

@@ -562,68 +562,72 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks, config):
     gt_boxes = gt_boxes.squeeze(0)
     gt_masks = gt_masks.squeeze(0)
 
-    # Handle COCO crowds
-    # A crowd box in COCO is a bounding box around several instances. Exclude
-    # them from training. A crowd box is given a negative class ID.
-    if torch.nonzero(gt_class_ids < 0).size():
-        crowd_ix = torch.nonzero(gt_class_ids < 0)[:, 0]
-        non_crowd_ix = torch.nonzero(gt_class_ids > 0)[:, 0]
-        crowd_boxes = gt_boxes[crowd_ix.data, :]
-        crowd_masks = gt_masks[crowd_ix.data, :, :]
-        gt_class_ids = gt_class_ids[non_crowd_ix.data]
-        gt_boxes = gt_boxes[non_crowd_ix.data, :]
-        gt_masks = gt_masks[non_crowd_ix.data, :]
-
-        # Compute overlaps with crowd boxes [anchors, crowds]
-        crowd_overlaps = bbox_overlaps(proposals, crowd_boxes)
-        crowd_iou_max = torch.max(crowd_overlaps, dim=1)[0]
-        no_crowd_bool = crowd_iou_max < 0.001
-    else:
-        no_crowd_bool =  Variable(torch.ByteTensor(proposals.size()[0]*[True]), requires_grad=False)
-        if config.GPU_COUNT:
-            no_crowd_bool = no_crowd_bool.cuda()
-
-    # Compute overlaps matrix [proposals, gt_boxes]
+    # 每个RoI和每个GTBOX的Overlaps率，是一个 RoI_Count * GTBOX_Count 的矩阵
     overlaps = bbox_overlaps(proposals, gt_boxes)
 
-    # Determine postive and negative ROIs
+    # 从overlaps中，对每个RoI，找出与之最大Overlap的GTBOX的Overlap，结果为 RoI_Count * 1
     roi_iou_max = torch.max(overlaps, dim=1)[0]
 
-    # 1. Positive ROIs are those with >= 0.5 IoU with a GT box
+    # 从RoI_IoU_Max，转换成一个同样大小的bool矩阵，overlap大于0.5为True，反之为False
     positive_roi_bool = roi_iou_max >= 0.5
 
     # Subsample ROIs. Aim for 33% positive
     # Positive ROIs
     if torch.nonzero(positive_roi_bool).size():
+
+        # 获取overlap大于0.5的index，返回的结果为 Positive_RoI_Count * 1
         positive_indices = torch.nonzero(positive_roi_bool)[:, 0]
 
         positive_count = int(config.TRAIN_ROIS_PER_IMAGE *
                              config.ROI_POSITIVE_RATIO)
+
+        # 获取一个随机的indices序列
         rand_idx = torch.randperm(positive_indices.size()[0])
+        # 从这个序列中，截取一个长度为 positive_count 子序列
         rand_idx = rand_idx[:positive_count]
         if config.GPU_COUNT:
             rand_idx = rand_idx.cuda()
+        # 从上面的随机步骤开始，其实就是为了打乱 positive_indices
         positive_indices = positive_indices[rand_idx]
         positive_count = positive_indices.size()[0]
+        # 从RoI中，根据positive_roi_indices获取positive_roi
         positive_rois = proposals[positive_indices.data,:]
 
-        # Assign positive ROIs to GT boxes.
+        # 通过positive_indices，从overlap中获取所有的positive_overlaps，返回 Positive_RoI_Count * GTBOX_Count
         positive_overlaps = overlaps[positive_indices.data,:]
+        # 从positive_overlaps中，对于每个GTBOX_Count，找到最大overlap的那个RoI，输出shape是 (Positive_ROI_COunt)
+        # 注意后面取了1，那么返回的实际上是最大值的索引
         roi_gt_box_assignment = torch.max(positive_overlaps, dim=1)[1]
+        # roi_gt_boxes包含所有与对应RoI有最大overlaps的那个GT
         roi_gt_boxes = gt_boxes[roi_gt_box_assignment.data,:]
+        # 获取对应的 class_ID
         roi_gt_class_ids = gt_class_ids[roi_gt_box_assignment.data]
+        """
+        总结上面的代码：
+        1. 得到positive_rois数组，假设总共有100个roi，其中80个的overlap大于0.5，这个这个数组是80
+        2. 对于每一个roi，找到对应的gt box，得到roi_gt_boxes，长度也是80，只不过每个元素是gtbox，（注意这里面有很多重复的gtbox）
+        3. 对于每一个roi，找到对应的class_id，得到 roi_gt_class_ids
+        这里的所有变量，都是通过ground_truth和RPN的输出得到的，所以都算做ground truth
+        """
 
-        # Compute bbox refinement for positive ROIs
+        """
+        对于每一个roi，通过对应的gtbox得到偏移量
+        """
         deltas = Variable(utils.box_refinement(positive_rois.data, roi_gt_boxes.data), requires_grad=False)
         std_dev = Variable(torch.from_numpy(config.BBOX_STD_DEV).float(), requires_grad=False)
         if config.GPU_COUNT:
             std_dev = std_dev.cuda()
         deltas /= std_dev
 
-        # Assign positive ROIs to GT masks
+        """
+        同上，对于每一个positive roi，拿到与之关联的Masks，Mask是一个只有0, 1的矩阵，同样这里会出现重复（多个positive_roi对应同一个mask）
+        """
         roi_masks = gt_masks[roi_gt_box_assignment.data,:,:]
 
-        # Compute mask targets
+        """
+        Mini MASK 是一个压缩算法，节省内存，参考
+        https://blog.csdn.net/u011974639/article/details/78483779
+        """
         boxes = positive_rois
         if config.USE_MINI_MASK:
             # Transform ROI corrdinates from normalized image space
@@ -640,6 +644,9 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks, config):
         box_ids = Variable(torch.arange(roi_masks.size()[0]), requires_grad=False).int()
         if config.GPU_COUNT:
             box_ids = box_ids.cuda()
+        """
+        将roi_mask，按照boxes来crop然后resize到相同的大小
+        """
         masks = Variable(CropAndResizeFunction(config.MASK_SHAPE[0], config.MASK_SHAPE[1], 0)(roi_masks.unsqueeze(1), boxes, box_ids).data, requires_grad=False)
         masks = masks.squeeze(1)
 
@@ -651,7 +658,7 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks, config):
 
     # 2. Negative ROIs are those with < 0.5 with every GT box. Skip crowds.
     negative_roi_bool = roi_iou_max < 0.5
-    negative_roi_bool = negative_roi_bool & no_crowd_bool
+    # negative_roi_bool = negative_roi_bool & no_crowd_bool
     # Negative ROIs. Add enough to maintain positive:negative ratio.
     if torch.nonzero(negative_roi_bool).size() and positive_count>0:
         negative_indices = torch.nonzero(negative_roi_bool)[:, 0]
@@ -881,7 +888,7 @@ class RPN(nn.Module):
         # Anchor Score. [batch, anchors per location * 2, height, width].
         rpn_class_logits = self.conv_class(x)
 
-        # Reshape to [batch, 2, anchors]
+        # Reshape to [batch, anchors, 2]
         rpn_class_logits = rpn_class_logits.permute(0,2,3,1)
         rpn_class_logits = rpn_class_logits.contiguous()
         rpn_class_logits = rpn_class_logits.view(x.size()[0], -1, 2)
@@ -1522,9 +1529,11 @@ class MaskRCNN(nn.Module):
         self.log_dir = os.path.join(self.model_dir, "{}{:%Y%m%dT%H%M}".format(
             self.config.NAME.lower(), now))
 
+        self.log_dir = self.model_dir
         # Path to save after each epoch. Include placeholders that get filled by Keras.
         self.checkpoint_path = os.path.join(self.log_dir, "mask_rcnn_{}_*epoch*.pth".format(
             self.config.NAME.lower()))
+
         self.checkpoint_path = self.checkpoint_path.replace(
             "*epoch*", "{:04d}")
 
@@ -1632,22 +1641,35 @@ class MaskRCNN(nn.Module):
 
             self.apply(set_bn_eval)
 
-        # Feature extraction
+        """
+        Feature extraction, this is the backbone network
+        Since we use fpn, the output is every layers output
+        There are together 6 layers
+        """
         [p2_out, p3_out, p4_out, p5_out, p6_out] = self.fpn(molded_images)
 
         # Note that P6 is used in RPN, but not in the classifier heads.
         rpn_feature_maps = [p2_out, p3_out, p4_out, p5_out, p6_out]
         mrcnn_feature_maps = [p2_out, p3_out, p4_out, p5_out]
 
-        # Loop through pyramid layers
-        layer_outputs = []  # list of lists
+        """
+        Computing the RPN output
+        We will do RPN forwarding on every layer of FPN, and save to layer_outputs.
+
+        Input of RPN is a feature map from FPN.
+        Outputs of RPN: [rpn_class_logits, rpn_probs, rpn_bbox]
+            1. rpn_class_logits: [batch_size, anchors, 2]  use to compute the classification loss of RPN network, bg or obj?
+            2. rpn_probs: [batch_size, anchors, 2] softmax of rpn_class_logits, used to determine bg or obj.
+            3. rpn_bbox: [batch_size, anchors, 4] bounding box regression.
+        """
+        layer_outputs = []
         for p in rpn_feature_maps:
             layer_outputs.append(self.rpn(p))
 
-        # Concatenate layer outputs
-        # Convert from list of lists of level outputs to list of lists
-        # of outputs across levels.
-        # e.g. [[a1, b1, c1], [a2, b2, c2]] => [[a1, a2], [b1, b2], [c1, c2]]
+        """
+        Now layer_outputs is [ [logits_1, propbs_1, bbox_1], [logits_2, propbs_2, bbox_2], ... ] for every FPN feature maps
+        Convert it to [ [logits_1, logits2, ...], [propbs_1, propb2, ...], [bbox_1, bbox_2, ...]  ]
+        """
         outputs = list(zip(*layer_outputs))
         outputs = [torch.cat(list(o), dim=1) for o in outputs]
         rpn_class_logits, rpn_class, rpn_bbox = outputs
@@ -1657,6 +1679,12 @@ class MaskRCNN(nn.Module):
         # and zero padded.
         proposal_count = self.config.POST_NMS_ROIS_TRAINING if mode == "training" \
             else self.config.POST_NMS_ROIS_INFERENCE
+
+
+        """
+        Get a subset of bounding box, use NMS and scores.
+        rpn_rois: [1, rois, (y1, x1, y2, x2)]
+        """
         rpn_rois = proposal_layer([rpn_class, rpn_bbox],
                                  proposal_count=proposal_count,
                                  nms_threshold=self.config.RPN_NMS_THRESHOLD,
@@ -1710,10 +1738,16 @@ class MaskRCNN(nn.Module):
             # Subsamples proposals and generates target outputs for training
             # Note that proposal class IDs, gt_boxes, and gt_masks are zero
             # padded. Equally, returned rois and targets are zero padded.
+            """
+            Compute ground truth target, to compute the loss
+            """
             rois, target_class_ids, target_deltas, target_mask = \
                 detection_target_layer(rpn_rois, gt_class_ids, gt_boxes, gt_masks, self.config)
 
             if not rois.size():
+                """
+                如果没有RoI，则所有的预测初始化为空值
+                """
                 mrcnn_class_logits = Variable(torch.FloatTensor())
                 mrcnn_class = Variable(torch.IntTensor())
                 mrcnn_bbox = Variable(torch.FloatTensor())
@@ -1726,11 +1760,20 @@ class MaskRCNN(nn.Module):
             else:
                 # Network Heads
                 # Proposal classifier and BBox regressor heads
+                """
+                预测 class 和 bounding box
+                """
                 mrcnn_class_logits, mrcnn_class, mrcnn_bbox = self.classifier(mrcnn_feature_maps, rois)
 
                 # Create masks for detections
+                """
+                预测 mask
+                """
                 mrcnn_mask = self.mask(mrcnn_feature_maps, rois)
 
+            """
+            返回gt 和 prediction，接下来就能算loss了
+            """
             return [rpn_class_logits, rpn_bbox, target_class_ids, mrcnn_class_logits, target_deltas, mrcnn_bbox, target_mask, mrcnn_mask]
 
     def train_model(self, train_dataset, val_dataset, learning_rate, epochs, layers):
@@ -1798,14 +1841,12 @@ class MaskRCNN(nn.Module):
             # Statistics
             self.loss_history.append(loss)
             self.val_loss_history.append(val_loss)
-            visualize.plot_loss(self.loss_history, self.val_loss_history, save=True, log_dir=self.log_dir)
+            # visualize.plot_loss(self.loss_history, self.val_loss_history, save=True, log_dir=self.log_dir)
 
             # Save model
             torch.save(self.state_dict(), self.checkpoint_path.format(epoch))
 
         self.epoch = epochs
-
-
 
     def train_epoch(self, datagenerator, optimizer, steps):
         batch_count = 0

@@ -1842,7 +1842,7 @@ class MaskRCNN(nn.Module):
             # Statistics
             self.loss_history.append(loss)
             self.val_loss_history.append(val_loss)
-            # visualize.plot_loss(self.loss_history, self.val_loss_history, save=True, log_dir=self.log_dir)
+            visualize.plot_loss(self.loss_history, self.val_loss_history, save=True, log_dir=self.log_dir)
 
             # Save model
             torch.save(self.state_dict(), self.checkpoint_path.format(epoch))
@@ -1903,11 +1903,12 @@ class MaskRCNN(nn.Module):
                 batch_count = 0
 
             # Progress
-            printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
-                             suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
-                                 loss.data.cpu()[0], rpn_class_loss.data.cpu()[0], rpn_bbox_loss.data.cpu()[0],
-                                 mrcnn_class_loss.data.cpu()[0], mrcnn_bbox_loss.data.cpu()[0],
-                                 mrcnn_mask_loss.data.cpu()[0]), length=10)
+            if (step % 50) == 0:
+                printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
+                                 suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
+                                     loss.data.cpu()[0], rpn_class_loss.data.cpu()[0], rpn_bbox_loss.data.cpu()[0],
+                                     mrcnn_class_loss.data.cpu()[0], mrcnn_bbox_loss.data.cpu()[0],
+                                     mrcnn_mask_loss.data.cpu()[0]), length=10)
 
             # Statistics
             loss_sum += loss.data.cpu()[0]/steps

@@ -1248,6 +1248,9 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
 
     # Compute overlaps [num_anchors, num_gt_boxes]
     overlaps = utils.compute_overlaps(anchors, gt_boxes)
+    # in some very special case, overlaps may be none, just skipped it
+    if len(overlaps) == 0:
+        return (False, False)
 
     # Match anchors to GT Boxes
     # If an anchor overlaps a GT box with IoU >= 0.7 then it's positive.
@@ -1382,6 +1385,10 @@ class Dataset(torch.utils.data.Dataset):
         # RPN Targets
         rpn_match, rpn_bbox = build_rpn_targets(image.shape, self.anchors,
                                                 gt_class_ids, gt_boxes, self.config)
+
+        # 一些极端情况
+        if not (rpn_match and rpn_bbox):
+            return []
 
         # If more instances than fits in the array, sub-sample from them.
         if gt_boxes.shape[0] > self.config.MAX_GT_INSTANCES:
@@ -1863,6 +1870,9 @@ class MaskRCNN(nn.Module):
         step = 0
 
         for inputs in datagenerator:
+            if len(inputs) == 0:
+                step += 1
+                continue
             batch_count += 1
 
             images = inputs[0]
@@ -1922,7 +1932,7 @@ class MaskRCNN(nn.Module):
             loss_sum += loss.data.cpu()[0]/steps
 
             # Break after 'steps' steps
-            if step==steps-1:
+            if step > steps-1:
                 break
             step += 1
 

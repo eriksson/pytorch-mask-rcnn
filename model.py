@@ -25,6 +25,7 @@ import utils
 import visualize
 from nms.nms_wrapper import nms
 from roialign.roi_align.crop_and_resize import CropAndResizeFunction
+from imageaug import random_flip, random_crop, random_rotate, random_brightness_transform
 
 
 ############################################################
@@ -1167,6 +1168,14 @@ def load_image_gt(dataset, config, image_id, augment=False,
     # Load image and mask
     image = dataset.load_image(image_id)
     mask, class_ids = dataset.load_mask(image_id)
+
+    # Random horizontal flips.
+    if augment:
+        image, mask = random_flip(image, mask)
+        image, mask = random_crop(image, mask)
+        image, mask = random_rotate(image, mask)
+        image = random_brightness_transform(image)
+
     shape = image.shape
     image, window, scale, padding = utils.resize_image(
         image,
@@ -1174,12 +1183,6 @@ def load_image_gt(dataset, config, image_id, augment=False,
         max_dim=config.IMAGE_MAX_DIM,
         padding=config.IMAGE_PADDING)
     mask = utils.resize_mask(mask, scale, padding)
-
-    # Random horizontal flips.
-    if augment:
-        if random.randint(0, 1):
-            image = np.fliplr(image)
-            mask = np.fliplr(mask)
 
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.

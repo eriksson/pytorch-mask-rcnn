@@ -1176,8 +1176,11 @@ def load_image_gt(dataset, config, image_id, augment=False,
         image, mask = random_rotate(image, mask)
         image = random_brightness_transform(image)
 
-    # 部分augmentation会是部分mask全部为0，忽略这些mask
-    mask = mask[:,:,~np.all(mask==0, axis=(0,1))]
+    # 忽略高度或宽度小于3个像素的mask
+    mask_height = np.sum(np.any(mask, axis=0), axis=0)
+    mask_width = np.sum(np.any(mask, axis=1), axis=0)
+    mask = mask[:,:, (mask_height > 2) * (mask_width > 2) ]
+
     shape = image.shape
     image, window, scale, padding = utils.resize_image(
         image,

@@ -98,7 +98,7 @@ def random_flip(image, masks):
     return image, masks
 
 
-def random_crop(image, masks, coe=0.7):
+def random_crop(image, masks, coe=0.8):
     """随机剪裁，大小为原图的coe倍
     """
     if np.random.random() < 0.5:

@@ -1173,7 +1173,9 @@ def load_image_gt(dataset, config, image_id, augment=False,
     if augment:
         image, mask = random_flip(image, mask)
         image, mask = random_crop(image, mask)
-        image, mask = random_rotate(image, mask)
+        # The image rotate will leave many white spaces
+        # Consider only 90 180 270 rotate
+        # image, mask = random_rotate(image, mask)
         image = random_brightness_transform(image)
 
     # 忽略高度或宽度小于3个像素的mask
@@ -1262,7 +1264,12 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
     #
     # 1. Set negative anchors first. They get overwritten below if a GT box is
     # matched to them. Skip boxes in crowd areas.
-    anchor_iou_argmax = np.argmax(overlaps, axis=1)
+
+    try:
+        anchor_iou_argmax = np.argmax(overlaps, axis=1)
+    except:
+        return (False, False)
+
     anchor_iou_max = overlaps[np.arange(overlaps.shape[0]), anchor_iou_argmax]
     rpn_match[(anchor_iou_max < 0.3) & (no_crowd_bool)] = -1
     # 2. Set an anchor for each GT box (regardless of IoU value).
@@ -1386,8 +1393,8 @@ class Dataset(torch.utils.data.Dataset):
         rpn_match, rpn_bbox = build_rpn_targets(image.shape, self.anchors,
                                                 gt_class_ids, gt_boxes, self.config)
 
-        # 一些极端情况
-        if not (rpn_match and rpn_bbox):
+        # ignore some very special case
+        if rpn_match is False:
             return []
 
         # If more instances than fits in the array, sub-sample from them.
@@ -1455,7 +1462,7 @@ class MaskRCNN(nn.Module):
         # Returns a list of the last layers of each stage, 5 in total.
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
 
-        resnet = ResNet("resnet50", stage5=True)
+        resnet = ResNet(config.BACKBONE_ARCH, stage5=True)
         C1, C2, C3, C4, C5 = resnet.stages()
 
         # Top-down Layers
@@ -1827,7 +1834,7 @@ class MaskRCNN(nn.Module):
         # Data generators
         train_set = Dataset(train_dataset, self.config, augment=True)
         train_generator = torch.utils.data.DataLoader(train_set, batch_size=1, shuffle=True, num_workers=4)
-        val_set = Dataset(val_dataset, self.config, augment=True)
+        val_set = Dataset(val_dataset, self.config, augment=False)
         val_generator = torch.utils.data.DataLoader(val_set, batch_size=1, shuffle=True, num_workers=4)
 
         # Train
@@ -1849,10 +1856,10 @@ class MaskRCNN(nn.Module):
             log("Epoch {}/{}.".format(epoch,epochs))
 
             # Training
-            loss = self.train_epoch(train_generator, optimizer, self.config.STEPS_PER_EPOCH)
+            loss = self.train_epoch(train_generator, optimizer)
 
             # Validation
-            val_loss = self.valid_epoch(val_generator, self.config.VALIDATION_STEPS)
+            val_loss = self.valid_epoch(val_generator)
 
             # Statistics
             self.loss_history.append(loss)
@@ -1864,10 +1871,11 @@ class MaskRCNN(nn.Module):
 
         self.epoch = epochs
 
-    def train_epoch(self, datagenerator, optimizer, steps):
+    def train_epoch(self, datagenerator, optimizer):
         batch_count = 0
         loss_sum = 0
         step = 0
+        steps = len(datagenerator)
 
         for inputs in datagenerator:
             if len(inputs) == 0:
@@ -1921,7 +1929,7 @@ class MaskRCNN(nn.Module):
                 batch_count = 0
 
             # Progress
-            if (step % 50) == 0:
+            if (step % self.config.SHOW_PROGRESS_STEPS) == 0:
                 printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
                                  suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
                                      loss.data.cpu()[0], rpn_class_loss.data.cpu()[0], rpn_bbox_loss.data.cpu()[0],
@@ -1930,18 +1938,15 @@ class MaskRCNN(nn.Module):
 
             # Statistics
             loss_sum += loss.data.cpu()[0]/steps
-
-            # Break after 'steps' steps
-            if step > steps-1:
-                break
             step += 1
 
         return loss_sum
 
-    def valid_epoch(self, datagenerator, steps):
+    def valid_epoch(self, datagenerator):
 
         step = 0
         loss_sum = 0
+        steps = len(datagenerator)
 
         for inputs in datagenerator:
             images = inputs[0]
@@ -1984,18 +1989,15 @@ class MaskRCNN(nn.Module):
             loss = rpn_class_loss + rpn_bbox_loss + mrcnn_class_loss + mrcnn_bbox_loss + mrcnn_mask_loss
 
             # Progress
-            printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
-                             suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
-                                 loss.data.cpu()[0], rpn_class_loss.data.cpu()[0], rpn_bbox_loss.data.cpu()[0],
-                                 mrcnn_class_loss.data.cpu()[0], mrcnn_bbox_loss.data.cpu()[0],
-                                 mrcnn_mask_loss.data.cpu()[0]), length=10)
+            if (step % self.config.SHOW_PROGRESS_STEPS) == 0:
+                printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
+                                suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
+                                    loss.data.cpu()[0], rpn_class_loss.data.cpu()[0], rpn_bbox_loss.data.cpu()[0],
+                                    mrcnn_class_loss.data.cpu()[0], mrcnn_bbox_loss.data.cpu()[0],
+                                    mrcnn_mask_loss.data.cpu()[0]), length=10)
 
             # Statistics
             loss_sum += loss.data.cpu()[0]/steps
-
-            # Break after 'steps' steps
-            if step==steps-1:
-                break
             step += 1
 
         return loss_sum

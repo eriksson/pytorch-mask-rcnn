@@ -1520,7 +1520,6 @@ class MaskRCNN(nn.Module):
         # Directory for training logs
         self.log_dir = os.path.join(self.model_dir, "{}{:%Y%m%dT%H%M}".format(
             self.config.NAME.lower(), now))
-
         # Path to save after each epoch. Include placeholders that get filled by Keras.
         self.checkpoint_path = os.path.join(self.log_dir, "mask_rcnn_{}_*epoch*.pth".format(
             self.config.NAME.lower()))
@@ -1552,7 +1551,7 @@ class MaskRCNN(nn.Module):
         checkpoint = os.path.join(dir_name, checkpoints[-1])
         return dir_name, checkpoint
 
-    def load_weights(self, filepath):
+    def load_weights(self, filepath, callback=None):
         """Modified version of the correspoding Keras function with
         the addition of multi-GPU support and the ability to exclude
         some layers from loading.
@@ -1560,6 +1559,8 @@ class MaskRCNN(nn.Module):
         """
         if os.path.exists(filepath):
             state_dict = torch.load(filepath)
+            if callback:
+                state_dict = callback(state_dict)
             self.load_state_dict(state_dict, strict=False)
         else:
             print("Weight file not found ...")

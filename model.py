@@ -58,8 +58,8 @@ def printProgressBar (iteration, total, prefix = '', suffix = '', decimals = 1, 
     """
     percent = ("{0:." + str(decimals) + "f}").format(100 * (iteration / float(total)))
     filledLength = int(length * iteration // total)
-    bar = fill * filledLength + '-' * (length - filledLength)
-    print('\r%s |%s| %s%% %s' % (prefix, bar, percent, suffix), end = '\n')
+    # bar = fill * filledLength + '-' * (length - filledLength)
+    print('\r%s %s%% %s' % (prefix, percent, suffix), end = '\n')
     # Print New Line on Complete
     if iteration == total:
         print()
@@ -1137,6 +1137,14 @@ def compute_losses(rpn_match, rpn_bbox, rpn_class_logits, rpn_pred_bbox, target_
 #  Data Generator
 ############################################################
 
+def image_augment(image, mask):
+    image, mask = random_flip(image, mask)
+    image, mask = random_crop(image, mask)
+    image, mask = random_right_angle_rotate(image, mask)
+    image = random_brightness_transform(image)
+    return image, mask
+
+
 def load_image_gt(dataset, config, image_id, augment=False,
                   use_mini_mask=False):
     """Load and return ground truth data for an image (image, mask, bounding boxes).
@@ -1161,6 +1169,11 @@ def load_image_gt(dataset, config, image_id, augment=False,
     # Load image and mask
     image = dataset.load_image(image_id)
     mask, class_ids = dataset.load_mask(image_id)
+
+    # Image augmentation
+    if augment and random.randint(0, 1):
+        image, mask = image_augment(image, mask)
+
     shape = image.shape
     image, window, scale, padding = utils.resize_image(
         image,
@@ -1168,13 +1181,6 @@ def load_image_gt(dataset, config, image_id, augment=False,
         max_dim=config.IMAGE_MAX_DIM,
         padding=config.IMAGE_PADDING)
     mask = utils.resize_mask(mask, scale, padding)
-
-    # Image augmentation
-    if augment and random.randint(0, 1):
-        image, mask = random_flip(image, mask)
-        image, mask = random_crop(image, mask)
-        image, mask = random_right_angle_rotate(image, mask)
-        image = random_brightness_transform(image)
 
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.

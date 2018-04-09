@@ -1,3 +1,7 @@
+import cv2
+import numpy as np
+import random
+
 def random_flip(image, masks):
     image = cv2.flip(image, 1)
     ret_masks = []
@@ -10,15 +14,12 @@ def random_flip(image, masks):
 
 
 def random_crop(image, masks, coe=0.7):
-    if coe >= 1:
-        return image, mask
-
     h, w = image.shape[:2]
     nh, nw = ( int(h * coe), int(w * coe) )
     random_x = random.choice(  range( 0, w - nw )   )
     random_y = random.choice( range( 0, h - nh )  )
 
-    image = image[random_y:(random_y+nh), random_x:(random_x+nw), :]
+    ret_image = image[random_y:(random_y+nh), random_x:(random_x+nw), :]
 
     ret_masks = []
     for i in range(masks.shape[2]):
@@ -26,18 +27,23 @@ def random_crop(image, masks, coe=0.7):
         mask = mask[random_y:(random_y+nh), random_x:(random_x + nw)]
 
         # ignore mask which has a height or width less than 3 pixels
-        if mask.shape[0] < 3 or mask.shape[1] < 3:
+        mask_height = np.sum(np.any(mask, axis=0), axis=0)
+        mask_width = np.sum(np.any(mask, axis=1), axis=0)
+        if mask_height < 2 or mask_width < 2:
             continue
-
         ret_masks.append(mask)
 
-    masks = np.transpose(np.asarray(ret_masks), (1, 2, 0))
-    return image, masks
+    if len(ret_masks) == 0:
+        ret_image, ret_masks = random_crop(image, masks)
+    else:
+        ret_masks = np.transpose(np.asarray(ret_masks), (1, 2, 0))
+    return ret_image, ret_masks
 
 def random_right_angle_rotate(image, masks):
     degree = random.choice(range(4))
     image = np.rot90(image, degree)
     masks = np.rot90(masks, degree)
+    return image, masks
 
 def random_brightness_transform(image, limit=[0.5,1.5]):
     image = image.copy()

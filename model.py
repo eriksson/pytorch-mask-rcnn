@@ -1835,6 +1835,15 @@ class MaskRCNN(nn.Module):
         loss_mrcnn_class_sum = 0
         loss_mrcnn_bbox_sum = 0
         loss_mrcnn_mask_sum = 0
+
+        batch_loss_sum = 0
+        batch_loss_rpn_class_sum = 0
+        batch_loss_rpn_bbox_sum = 0
+        batch_loss_mrcnn_class_sum = 0
+        batch_loss_mrcnn_bbox_sum = 0
+        batch_loss_mrcnn_mask_sum = 0
+        batch_size = self.config.BATCH_SIZE
+
         step = 0
 
         optimizer.zero_grad()
@@ -1881,25 +1890,48 @@ class MaskRCNN(nn.Module):
             # Backpropagation
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.parameters(), 5.0)
+
+            iter_batch_loss = loss.data.cpu().item()
+            iter_batch_loss_rpn_class = rpn_class_loss.data.cpu().item()
+            iter_batch_loss_rpn_bbox = rpn_bbox_loss.data.cpu().item()
+            iter_batch_loss_mrcnn_class = mrcnn_class_loss.data.cpu().item()
+            iter_batch_loss_mrcnn_bbox = mrcnn_bbox_loss.data.cpu().item()
+            iter_batch_loss_mrcnn_mask = mrcnn_mask_loss.data.cpu().item()
+
             if (batch_count % self.config.BATCH_SIZE) == 0:
                 optimizer.step()
                 optimizer.zero_grad()
                 batch_count = 0
 
-            # Progress
-            printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
-                             suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
-                                 loss.data.cpu().item(), rpn_class_loss.data.cpu().item(), rpn_bbox_loss.data.cpu().item(),
-                                 mrcnn_class_loss.data.cpu().item(), mrcnn_bbox_loss.data.cpu().item(),
-                                 mrcnn_mask_loss.data.cpu().item()), length=10)
+                # Progress
+                printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
+                                suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
+                                    batch_loss_sum, batch_loss_rpn_class_sum, batch_loss_rpn_bbox_sum,
+                                    batch_loss_mrcnn_class_sum, batch_loss_mrcnn_bbox_sum,
+                                    batch_loss_mrcnn_mask_sum), length=10)
+
+                batch_loss_sum = 0
+                batch_loss_rpn_class_sum = 0
+                batch_loss_rpn_bbox_sum = 0
+                batch_loss_mrcnn_class_sum = 0
+                batch_loss_mrcnn_bbox_sum = 0
+                batch_loss_mrcnn_mask_sum = 0    
+            else:
+                # Statistics
+                batch_loss_sum += iter_batch_loss/batch_size
+                batch_loss_rpn_class_sum += iter_batch_loss_rpn_class/batch_size
+                batch_loss_rpn_bbox_sum += iter_batch_loss_rpn_bbox/batch_size
+                batch_loss_mrcnn_class_sum += iter_batch_loss_mrcnn_class/batch_size
+                batch_loss_mrcnn_bbox_sum += iter_batch_loss_mrcnn_bbox/batch_size
+                batch_loss_mrcnn_mask_sum += iter_batch_loss_mrcnn_mask/batch_size
 
             # Statistics
-            loss_sum += loss.data.cpu().item()/steps
-            loss_rpn_class_sum += rpn_class_loss.data.cpu().item()/steps
-            loss_rpn_bbox_sum += rpn_bbox_loss.data.cpu().item()/steps
-            loss_mrcnn_class_sum += mrcnn_class_loss.data.cpu().item()/steps
-            loss_mrcnn_bbox_sum += mrcnn_bbox_loss.data.cpu().item()/steps
-            loss_mrcnn_mask_sum += mrcnn_mask_loss.data.cpu().item()/steps
+            loss_sum += iter_batch_loss/steps
+            loss_rpn_class_sum += iter_batch_loss_rpn_class/steps
+            loss_rpn_bbox_sum += iter_batch_loss_rpn_bbox/steps
+            loss_mrcnn_class_sum += iter_batch_loss_mrcnn_class/steps
+            loss_mrcnn_bbox_sum += iter_batch_loss_mrcnn_bbox/steps
+            loss_mrcnn_mask_sum += iter_batch_loss_mrcnn_mask/steps
 
             # Break after 'steps' steps
             if step==steps-1:

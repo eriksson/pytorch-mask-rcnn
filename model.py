@@ -1528,6 +1528,12 @@ class MaskRCNN(nn.Module):
         # Directory for training logs
         self.log_dir = os.path.join(self.model_dir, "{}{:%Y%m%dT%H%M}".format(
             self.config.NAME.lower(), now))
+
+        try:
+            os.makedirs(self.log_dir)
+        except:
+            pass
+
         # Path to save after each epoch. Include placeholders that get filled by Keras.
         self.checkpoint_path = os.path.join(self.log_dir, "mask_rcnn_{}_*epoch*.pth".format(
             self.config.NAME.lower()))
@@ -1962,53 +1968,54 @@ class MaskRCNN(nn.Module):
             # image_metas as numpy array
             image_metas = image_metas.numpy()
 
-            # Wrap in variables
-            images = Variable(images, volatile=True)
-            rpn_match = Variable(rpn_match, volatile=True)
-            rpn_bbox = Variable(rpn_bbox, volatile=True)
-            gt_class_ids = Variable(gt_class_ids, volatile=True)
-            gt_boxes = Variable(gt_boxes, volatile=True)
-            gt_masks = Variable(gt_masks, volatile=True)
+            with torch.no_grad():
+                # Wrap in variables
+                images = Variable(images)
+                rpn_match = Variable(rpn_match)
+                rpn_bbox = Variable(rpn_bbox)
+                gt_class_ids = Variable(gt_class_ids)
+                gt_boxes = Variable(gt_boxes)
+                gt_masks = Variable(gt_masks)
 
-            # To GPU
-            if self.config.GPU_COUNT:
-                images = images.cuda()
-                rpn_match = rpn_match.cuda()
-                rpn_bbox = rpn_bbox.cuda()
-                gt_class_ids = gt_class_ids.cuda()
-                gt_boxes = gt_boxes.cuda()
-                gt_masks = gt_masks.cuda()
+                # To GPU
+                if self.config.GPU_COUNT:
+                    images = images.cuda()
+                    rpn_match = rpn_match.cuda()
+                    rpn_bbox = rpn_bbox.cuda()
+                    gt_class_ids = gt_class_ids.cuda()
+                    gt_boxes = gt_boxes.cuda()
+                    gt_masks = gt_masks.cuda()
 
-            # Run object detection
-            rpn_class_logits, rpn_pred_bbox, target_class_ids, mrcnn_class_logits, target_deltas, mrcnn_bbox, target_mask, mrcnn_mask = \
-                self.predict([images, image_metas, gt_class_ids, gt_boxes, gt_masks], mode='training')
+                # Run object detection
+                rpn_class_logits, rpn_pred_bbox, target_class_ids, mrcnn_class_logits, target_deltas, mrcnn_bbox, target_mask, mrcnn_mask = \
+                    self.predict([images, image_metas, gt_class_ids, gt_boxes, gt_masks], mode='training')
 
-            if len(target_class_ids) == 0:
-                continue
+                if len(target_class_ids) == 0:
+                    continue
 
-            # Compute losses
-            rpn_class_loss, rpn_bbox_loss, mrcnn_class_loss, mrcnn_bbox_loss, mrcnn_mask_loss = compute_losses(rpn_match, rpn_bbox, rpn_class_logits, rpn_pred_bbox, target_class_ids, mrcnn_class_logits, target_deltas, mrcnn_bbox, target_mask, mrcnn_mask)
-            loss = rpn_class_loss + rpn_bbox_loss + mrcnn_class_loss + mrcnn_bbox_loss + mrcnn_mask_loss
+                # Compute losses
+                rpn_class_loss, rpn_bbox_loss, mrcnn_class_loss, mrcnn_bbox_loss, mrcnn_mask_loss = compute_losses(rpn_match, rpn_bbox, rpn_class_logits, rpn_pred_bbox, target_class_ids, mrcnn_class_logits, target_deltas, mrcnn_bbox, target_mask, mrcnn_mask)
+                loss = rpn_class_loss + rpn_bbox_loss + mrcnn_class_loss + mrcnn_bbox_loss + mrcnn_mask_loss
 
-            # Progress
-            printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
-                             suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
-                                 loss.data.cpu().item(), rpn_class_loss.data.cpu().item(), rpn_bbox_loss.data.cpu().item(),
-                                 mrcnn_class_loss.data.cpu().item(), mrcnn_bbox_loss.data.cpu().item(),
-                                 mrcnn_mask_loss.data.cpu().item()), length=10)
+                # Progress
+                printProgressBar(step + 1, steps, prefix="\t{}/{}".format(step + 1, steps),
+                                suffix="Complete - loss: {:.5f} - rpn_class_loss: {:.5f} - rpn_bbox_loss: {:.5f} - mrcnn_class_loss: {:.5f} - mrcnn_bbox_loss: {:.5f} - mrcnn_mask_loss: {:.5f}".format(
+                                    loss.data.cpu().item(), rpn_class_loss.data.cpu().item(), rpn_bbox_loss.data.cpu().item(),
+                                    mrcnn_class_loss.data.cpu().item(), mrcnn_bbox_loss.data.cpu().item(),
+                                    mrcnn_mask_loss.data.cpu().item()), length=10)
 
-            # Statistics
-            loss_sum += loss.data.cpu().item()/steps
-            loss_rpn_class_sum += rpn_class_loss.data.cpu().item()/steps
-            loss_rpn_bbox_sum += rpn_bbox_loss.data.cpu().item()/steps
-            loss_mrcnn_class_sum += mrcnn_class_loss.data.cpu().item()/steps
-            loss_mrcnn_bbox_sum += mrcnn_bbox_loss.data.cpu().item()/steps
-            loss_mrcnn_mask_sum += mrcnn_mask_loss.data.cpu().item()/steps
+                # Statistics
+                loss_sum += loss.data.cpu().item()/steps
+                loss_rpn_class_sum += rpn_class_loss.data.cpu().item()/steps
+                loss_rpn_bbox_sum += rpn_bbox_loss.data.cpu().item()/steps
+                loss_mrcnn_class_sum += mrcnn_class_loss.data.cpu().item()/steps
+                loss_mrcnn_bbox_sum += mrcnn_bbox_loss.data.cpu().item()/steps
+                loss_mrcnn_mask_sum += mrcnn_mask_loss.data.cpu().item()/steps
 
-            # Break after 'steps' steps
-            if step==steps-1:
-                break
-            step += 1
+                # Break after 'steps' steps
+                if step==steps-1:
+                    break
+                step += 1
 
         return loss_sum, loss_rpn_class_sum, loss_rpn_bbox_sum, loss_mrcnn_class_sum, loss_mrcnn_bbox_sum, loss_mrcnn_mask_sum
 

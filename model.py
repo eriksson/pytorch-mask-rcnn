@@ -26,6 +26,7 @@ import visualize
 from nms.nms_wrapper import nms
 from roialign.roi_align.crop_and_resize import CropAndResizeFunction
 from augment import random_flip, random_crop, random_right_angle_rotate, random_brightness_transform
+from tqdm import tqdm
 
 
 ############################################################
@@ -1871,10 +1872,10 @@ class MaskRCNN(nn.Module):
 
         optimizer.zero_grad()
         it = iter(datagenerator)
-        for step in tqdm_notebook(range(steps)):
+        for step in tqdm(range(steps)):
             batch_count += 1
             inputs = next(it)
-             
+
             images = inputs[0]
             image_metas = inputs[1]
             rpn_match = inputs[2]

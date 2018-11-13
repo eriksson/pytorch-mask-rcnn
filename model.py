@@ -784,16 +784,18 @@ def refine_detections(rois, probs, deltas, window, config):
     # Filter out low confidence boxes
     if config.DETECTION_MIN_CONFIDENCE:
         keep_bool = keep_bool & (class_scores >= config.DETECTION_MIN_CONFIDENCE)
-    keep = torch.nonzero(keep_bool)[:,0]
+    keep = torch.nonzero(keep_bool)
 
     # Apply per-class NMS
     pre_nms_class_ids = class_ids[keep.data]
     pre_nms_scores = class_scores[keep.data]
     pre_nms_rois = refined_rois[keep.data]
 
+    nms_keep = None
+
     for i, class_id in enumerate(unique1d(pre_nms_class_ids)):
         # Pick detections of this class
-        ixs = torch.nonzero(pre_nms_class_ids == class_id)[:,0]
+        ixs = torch.nonzero(pre_nms_class_ids == class_id)
 
         # Sort
         ix_rois = pre_nms_rois[ixs.data]
@@ -810,7 +812,9 @@ def refine_detections(rois, probs, deltas, window, config):
             nms_keep = class_keep
         else:
             nms_keep = unique1d(torch.cat((nms_keep, class_keep)))
-    keep = intersect1d(keep, nms_keep)
+    
+    if nms_keep:
+        keep = intersect1d(keep, nms_keep)
 
     # Keep top detections
     roi_count = config.DETECTION_MAX_INSTANCES

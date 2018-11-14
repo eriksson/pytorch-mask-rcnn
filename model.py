@@ -26,7 +26,7 @@ import visualize
 from nms.nms_wrapper import nms
 from roialign.roi_align.crop_and_resize import CropAndResizeFunction
 from augment import random_flip, random_crop, random_right_angle_rotate, random_brightness_transform
-from tqdm import tqdm
+from tqdm.autonotebook import tqdm
 
 
 ############################################################
